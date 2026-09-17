@@ -153,9 +153,8 @@ void lvgl_task( void * pvParameters ) //Aca pongo explicitamente lo que quiero q
         // Release the mutex
         lvgl_port_unlock();
     }
-    vTaskDelay(pdMS_TO_TICKS(10));
-   
- }
+   vTaskDelete(NULL);   // la tarea terminó su trabajo, se borra a sí misma
+}
 
  esp_err_t create_tasks( lv_disp_t *disp ) //Funcion para poder crear tareas, la cual es llamada desde el main, el esp_err_t es para poder retornar un error en caso de que no se pueda crear la tarea.
   {
