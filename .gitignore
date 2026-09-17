@@ -1,0 +1,19 @@
+# Archivos de compilación de ESP-IDF
+build/
+*.bin
+*.elf
+*.map
+
+# Archivos de configuración de respaldo
+sdkconfig.old
+
+# Configuraciones locales del editor
+.vscode/
+
+# Componentes administrados (si usas el IDF Component Manager)
+managed_components/
+dependencies.lock
+
+# Archivos del sistema operativo (Windows/Mac)
+Thumbs.db
+.DS_Store

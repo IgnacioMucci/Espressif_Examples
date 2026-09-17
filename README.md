@@ -1,0 +1,1 @@
+Este repositorio contiene el proyecto desarrollado para la placa ESP32, utilizando el framework oficial ESP-IDF mediante contenedores de Docker.
