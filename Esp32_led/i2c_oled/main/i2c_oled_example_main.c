@@ -49,9 +49,17 @@ static const char *TAG = "example";
 
 #define STACK_SIZE 2048*2
 
+
+//Ball parameters 
+static lv_obj_t *ball_obj;
+static int16_t ball_x = 10;
+static int16_t ball_y = 10;
+static int16_t ball_dx = 2;
+static int16_t ball_dy = 2;
+
 extern void example_lvgl_demo_ui(lv_disp_t *disp);
 esp_err_t create_tasks( lv_disp_t *disp );
- void vTaskCode( void * pvParameters );
+ void ball_task( void * pvParameters );
 
 
 void app_main(void)
@@ -142,18 +150,77 @@ void app_main(void)
  
 
 
-void lvgl_task( void * pvParameters ) //Aca pongo explicitamente lo que quiero que haga la tarea,
- {
-   
-    //Convertimos el parámetro genérico de nuevo a una pantalla
+void ball_task( void * pvParameters ) 
+{
+    // Cast the generic parameter back to a display pointer
     lv_disp_t *disp = (lv_disp_t *)pvParameters;
-    // Lock the mutex due to the LVGL APIs are not thread-safe
-    if (lvgl_port_lock(0)) {
-        example_lvgl_demo_ui(disp);
+    
+    // 1. Get the active screen from the display
+    lv_obj_t *scr = lv_disp_get_scr_act(disp);
+
+    // 2. Wait up to 100ms for the mutex to ensure safe UI creation
+    if (lvgl_port_lock(100)) {
+        
+        // Create the base object on the active screen
+        ball_obj = lv_obj_create(scr); 
+        lv_obj_set_size(ball_obj, 12, 12); 
+        
+        // Apply a 50% radius to turn the square into a perfect circle
+        lv_obj_set_style_radius(ball_obj, LV_RADIUS_CIRCLE, 0); 
+        
+        // Force 100% opacity (cover) so it's not a transparent ghost
+        lv_obj_set_style_bg_opa(ball_obj, LV_OPA_COVER, 0); 
+        lv_obj_set_style_bg_color(ball_obj, lv_color_black(), 0); 
+        lv_obj_set_style_border_width(ball_obj, 0, 0); 
+        
+        // Set the initial position
+        lv_obj_set_pos(ball_obj, ball_x, ball_y); 
+        
         // Release the mutex
         lvgl_port_unlock();
     }
-   vTaskDelete(NULL);   // la tarea terminó su trabajo, se borra a sí misma
+
+    // 3. Infinite animation loop
+    while (1) {
+        // Suspend task for 30ms (~33 FPS) to yield CPU to other tasks
+        vTaskDelay(pdMS_TO_TICKS(30)); 
+
+        // Request UI access again with a 100ms timeout
+        if (lvgl_port_lock(100)) {
+            
+            // FAILSAFE: Only calculate and move if the object actually exists
+            if (ball_obj != NULL) {
+                
+                // Update coordinates based on current velocity
+                ball_x += ball_dx; 
+                ball_y += ball_dy; 
+
+                // X-axis collision detection (Left and Right borders)
+                if (ball_x <= 0) {
+                    ball_x = 0;
+                    ball_dx *= -1; // Reverse horizontal direction
+                } else if (ball_x >= (EXAMPLE_LCD_H_RES - 12)) {
+                    ball_x = EXAMPLE_LCD_H_RES - 12;
+                    ball_dx *= -1;
+                }
+
+                // Y-axis collision detection (Top and Bottom borders)
+                if (ball_y <= 0) {
+                    ball_y = 0;
+                    ball_dy *= -1; // Reverse vertical direction
+                } else if (ball_y >= (EXAMPLE_LCD_V_RES - 12)) {
+                    ball_y = EXAMPLE_LCD_V_RES - 12;
+                    ball_dy *= -1;
+                }
+
+                // Apply the new calculated coordinates to the LVGL object
+                lv_obj_set_pos(ball_obj, ball_x, ball_y); 
+            }
+            
+            // Release the mutex so the background task can render the frame
+            lvgl_port_unlock();
+        }
+    }
 }
 
  esp_err_t create_tasks( lv_disp_t *disp ) //Funcion para poder crear tareas, la cual es llamada desde el main, el esp_err_t es para poder retornar un error en caso de que no se pueda crear la tarea.
@@ -161,11 +228,11 @@ void lvgl_task( void * pvParameters ) //Aca pongo explicitamente lo que quiero q
   TaskHandle_t xHandle = NULL; // Varaible que se utiliza para ver si la task fue creada correctamente, si no es asi, se retorna un error.
  
   
-    xTaskCreate( lvgl_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
-        "Tarea_lvgl", 
+    xTaskCreate( ball_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
+        "Bouncing_ball", 
         STACK_SIZE, 
         disp, 
-        1, 
+        5, 
         &xHandle );
  return ESP_OK; // Retorna un error en caso de que no se pueda crear la tarea.
   }
