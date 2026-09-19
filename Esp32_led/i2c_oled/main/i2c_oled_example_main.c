@@ -57,10 +57,15 @@ static int16_t ball_y = 10;
 static int16_t ball_dx = 2;
 static int16_t ball_dy = 2;
 
+
+//Spinner parameters
+static lv_obj_t *spinner_obj;
+
+
 extern void example_lvgl_demo_ui(lv_disp_t *disp);
 esp_err_t create_tasks( lv_disp_t *disp );
- void ball_task( void * pvParameters );
-
+void ball_task( void * pvParameters );
+void spinner_task( void * pvParameters );
 
 void app_main(void)
 {
@@ -223,16 +228,62 @@ void ball_task( void * pvParameters )
     }
 }
 
+
+void spinner_task( void * pvParameters ) 
+{
+    // Cast the generic parameter back to a display pointer
+    lv_disp_t *disp = (lv_disp_t *)pvParameters;
+    
+    // Get the active screen from the display
+    lv_obj_t *scr = lv_disp_get_scr_act(disp);
+
+    // Wait up to 100ms for the mutex to ensure safe UI creation
+    if (lvgl_port_lock(100)) {
+        
+        //Force the background color to black for safety
+        lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+
+        // Center the content on the screen
+        lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_flex_main_place(scr, LV_FLEX_ALIGN_CENTER, 0);
+        lv_obj_set_style_flex_track_place(scr, LV_FLEX_ALIGN_CENTER, 0);        
+
+        spinner_obj = lv_spinner_create(scr, 1500, 180); // Create a spinner with: lv_spinner_create(parent, spin_time_ms, arc_angle)
+        lv_obj_set_size(spinner_obj, 35, 35); // Set the size of the spinner to 50x50 pixels
+
+        lv_obj_set_style_arc_color(spinner_obj, lv_color_black(), LV_PART_MAIN); // LV_PART_MAIN is the background ring 
+        lv_obj_set_style_arc_color(spinner_obj, lv_color_white(), LV_PART_INDICATOR);  // LV_PART_INDICATOR is the spinning portion
+        
+       
+        lv_obj_set_style_arc_width(spinner_obj, 2, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(spinner_obj, 2, LV_PART_INDICATOR);
+
+        // Release the mutex
+        lvgl_port_unlock();
+    }
+
+    // The task already created the UI and finished its job, it must delete itself.
+    vTaskDelete(NULL);
+}
+
  esp_err_t create_tasks( lv_disp_t *disp ) //Funcion para poder crear tareas, la cual es llamada desde el main, el esp_err_t es para poder retornar un error en caso de que no se pueda crear la tarea.
   {
   TaskHandle_t xHandle = NULL; // Varaible que se utiliza para ver si la task fue creada correctamente, si no es asi, se retorna un error.
  
-  
+  /*
     xTaskCreate( ball_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
         "Bouncing_ball", 
         STACK_SIZE, 
         disp, 
         5, 
         &xHandle );
+    */
+        xTaskCreate( spinner_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
+        "Spinner", 
+        STACK_SIZE, 
+        disp, 
+        5, 
+        &xHandle );    
+
  return ESP_OK; // Retorna un error en caso de que no se pueda crear la tarea.
   }
