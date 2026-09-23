@@ -61,11 +61,14 @@ static int16_t ball_dy = 2;
 //Spinner parameters
 static lv_obj_t *spinner_obj;
 
+TaskHandle_t ballTaskHandle = NULL; //Global variable to hold the handle of the ball task
+
 
 extern void example_lvgl_demo_ui(lv_disp_t *disp);
 esp_err_t create_tasks( lv_disp_t *disp );
 void ball_task( void * pvParameters );
 void spinner_task( void * pvParameters );
+void animation_controller_task( void * pvParameters );
 
 void app_main(void)
 {
@@ -150,7 +153,7 @@ void app_main(void)
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
 
     ESP_LOGI(TAG, "Display LVGL Scroll Text");
-    create_tasks(disp); //Llamo a la funcion para crear la tarea, la cual es la que va a ejecutar el lvgl_task, la cual es la que va a ejecutar el lv_timer_handler, el cual es el que va a actualizar la pantalla.
+    create_tasks(disp); //Call the function to create the task, the one that will execute the lvgl_task, the one that will execute the lv_timer_handler, the one that will update the screen.
 }
  
 
@@ -243,14 +246,10 @@ void spinner_task( void * pvParameters )
         //Force the background color to black for safety
         lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
-        // Center the content on the screen
-        lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_flex_main_place(scr, LV_FLEX_ALIGN_CENTER, 0);
-        lv_obj_set_style_flex_track_place(scr, LV_FLEX_ALIGN_CENTER, 0);        
-
         spinner_obj = lv_spinner_create(scr, 1500, 180); // Create a spinner with: lv_spinner_create(parent, spin_time_ms, arc_angle)
         lv_obj_set_size(spinner_obj, 35, 35); // Set the size of the spinner to 50x50 pixels
 
+        lv_obj_center(spinner_obj); // Allin the spinner to the center of the screen
         lv_obj_set_style_arc_color(spinner_obj, lv_color_black(), LV_PART_MAIN); // LV_PART_MAIN is the background ring 
         lv_obj_set_style_arc_color(spinner_obj, lv_color_white(), LV_PART_INDICATOR);  // LV_PART_INDICATOR is the spinning portion
         
@@ -266,24 +265,64 @@ void spinner_task( void * pvParameters )
     vTaskDelete(NULL);
 }
 
- esp_err_t create_tasks( lv_disp_t *disp ) //Funcion para poder crear tareas, la cual es llamada desde el main, el esp_err_t es para poder retornar un error en caso de que no se pueda crear la tarea.
+
+
+void animation_controller_task(void *pvParameters) {
+    //Give some time for both the animations to start and display their initial state
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    while(1) {
+    
+        vTaskSuspend(ballTaskHandle); // Suspend the ball movement task to freeze the ball in place
+        
+        if (lvgl_port_lock(100)) {
+            // Hide the ball and show the spinner
+            if(ball_obj) lv_obj_add_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+            if(spinner_obj) lv_obj_clear_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(5000)); // wait 5 seconds
+
+    
+        if (lvgl_port_lock(100)) {
+            // Hide the spinner and show the ball
+            if(spinner_obj) lv_obj_add_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+            if(ball_obj) lv_obj_clear_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+            lvgl_port_unlock();
+        }
+        
+        vTaskResume(ballTaskHandle); // Resume the ball movement task
+        vTaskDelay(pdMS_TO_TICKS(5000)); // wait 5 seconds
+    }
+}
+
+ esp_err_t create_tasks( lv_disp_t *disp ) //Function to create tasks, which is called from the main function, the esp_err_t is used to return an error if the task cannot be created.
   {
-  TaskHandle_t xHandle = NULL; // Varaible que se utiliza para ver si la task fue creada correctamente, si no es asi, se retorna un error.
+  TaskHandle_t xHandle = NULL; // Variable used to check if the task was created correctly, if not, an error is returned.
  
-  /*
-    xTaskCreate( ball_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
+  
+    xTaskCreate( ball_task,   //Function to create the task, which receives as the first argument the name of the function to be executed in the task, the second argument is the name of the task, the third argument is the size of the task stack, the fourth argument is a pointer to the parameters to be passed to the task, the fifth argument is the priority of the task and the sixth argument is a pointer to a variable that will contain the handle of the task.
         "Bouncing_ball", 
         STACK_SIZE, 
         disp, 
         5, 
-        &xHandle );
-    */
-        xTaskCreate( spinner_task,   //Funcion para crear la tarea, la cual recibe como primer argumento el nombre de la funcion que se va a ejecutar en la tarea, el segundo argumento es el nombre de la tarea, el tercer argumento es el tamaño de la pila de la tarea, el cuarto argumento es un puntero a los parametros que se le van a pasar a la tarea, el quinto argumento es la prioridad de la tarea y el sexto argumento es un puntero a una variable que va a contener el handle de la tarea.
+        &ballTaskHandle ); // Store the handle of the ball task in the global variable ballTaskHandle so it can be suspended and resumed later.
+
+        xTaskCreate( spinner_task,   //Function to create the task, which receives as the first argument the name of the function to be executed in the task, the second argument is the name of the task, the third argument is the size of the task stack, the fourth argument is a pointer to the parameters to be passed to the task, the fifth argument is the priority ofthe task andthe sixth argument is a pointer to a variable that will containthe handle ofthe task.
         "Spinner", 
         STACK_SIZE, 
         disp, 
         5, 
+        &xHandle );
+        
+        
+        xTaskCreate( animation_controller_task,   //Function to create the task, which receives as the first argument the name of the function to be executed in the task, the second argument is the name of the task, the third argument is the size of the task stack, the fourth argument is a pointer to the parameters to be passed to the task, the fifth argument is the priority ofthe task andthe sixth argument is a pointer to a variable that will containthe handle ofthe task.
+        "Handler", 
+        STACK_SIZE, 
+        NULL, 
+        10, 
         &xHandle );    
 
- return ESP_OK; // Retorna un error en caso de que no se pueda crear la tarea.
+ return ESP_OK; // Returns an error if the task cannot be created.
   }
