@@ -14,6 +14,7 @@
 #include "driver/i2c_master.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "esp_timer.h"
 
 #if CONFIG_EXAMPLE_LCD_CONTROLLER_SH1107
 #include "esp_lcd_sh1107.h"
@@ -56,6 +57,7 @@ static int16_t ball_x = 10;
 static int16_t ball_y = 10;
 static int16_t ball_dx = 2;
 static int16_t ball_dy = 2;
+static bool ball_state = true;
 
 
 //Spinner parameters
@@ -65,10 +67,13 @@ TaskHandle_t ballTaskHandle = NULL; //Global variable to hold the handle of the 
 
 
 extern void example_lvgl_demo_ui(lv_disp_t *disp);
-esp_err_t create_tasks( lv_disp_t *disp );
+esp_err_t create_tasks( lv_disp_t *disp ); // Function to create tasks, which is called from the main function, the esp_err_t is used to return an error if the task cannot be created.
 void ball_task( void * pvParameters );
 void spinner_task( void * pvParameters );
-void animation_controller_task( void * pvParameters );
+void animation_controller_task( void * pvParameters ); // Function to create a task that will control the animation, switching between the ball and the spinner every 5 seconds.
+void timer_init(); // Function to initialize the timer that will call the lvgl_timer_handler function every 5 seconds to switch between the ball and the spinner.
+static void lvgl_timer_handler(void* arg); // Function to handle the timer callback, which will be called every 5 seconds to switch between the ball and the spinner.
+
 
 void app_main(void)
 {
@@ -153,7 +158,9 @@ void app_main(void)
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
 
     ESP_LOGI(TAG, "Display LVGL Scroll Text");
+
     create_tasks(disp); //Call the function to create the task, the one that will execute the lvgl_task, the one that will execute the lv_timer_handler, the one that will update the screen.
+    timer_init(); //Initialize the timer that will call the lv_timer_handler function every 5 seconds to switch between the ball and the spinner.
 }
  
 
@@ -249,7 +256,7 @@ void spinner_task( void * pvParameters )
         spinner_obj = lv_spinner_create(scr, 1500, 180); // Create a spinner with: lv_spinner_create(parent, spin_time_ms, arc_angle)
         lv_obj_set_size(spinner_obj, 35, 35); // Set the size of the spinner to 50x50 pixels
 
-        lv_obj_center(spinner_obj); // Allin the spinner to the center of the screen
+        lv_obj_center(spinner_obj); // Align the spinner to the center of the screen
         lv_obj_set_style_arc_color(spinner_obj, lv_color_black(), LV_PART_MAIN); // LV_PART_MAIN is the background ring 
         lv_obj_set_style_arc_color(spinner_obj, lv_color_white(), LV_PART_INDICATOR);  // LV_PART_INDICATOR is the spinning portion
         
@@ -265,8 +272,44 @@ void spinner_task( void * pvParameters )
     vTaskDelete(NULL);
 }
 
+static void lvgl_timer_handler(void* arg) {
+    
+    
+    if (lvgl_port_lock(0)) {
+        if (ball_state) { // If the ball is currently visible, hide it and show the spinner
+             if(ball_obj) lv_obj_add_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+            if(spinner_obj) lv_obj_clear_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+        } else {// If the spinner is currently visible, hide it and show the ball
+             if(spinner_obj) lv_obj_add_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+            if(ball_obj) lv_obj_clear_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+        }
+        lvgl_port_unlock();
+        if (ball_state) {
+             vTaskSuspend(ballTaskHandle); // Suspend the ball movement task to freeze the ball in place
+        } else {
+             vTaskResume(ballTaskHandle);  // Resume the ball movement task
+        }
+        ball_state = !ball_state; // Toggle the state of the ball (true = show ball, false = show spinner)
+    }
+}
 
 
+ void timer_init() {
+    const esp_timer_create_args_t timer_args = { // Arguments to create the timer
+        .callback = &lvgl_timer_handler, // Callback function that will be called when the timer expires
+        .name = "timer_animacion", // Name of the timer
+        .arg = NULL,               // Argument to pass to the callback function (not used here)            
+        .dispatch_method = ESP_TIMER_TASK  // The timer callback will be called from the timer task context
+    };
+
+    esp_timer_handle_t lvgl_timer;// Handle for the timer
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &lvgl_timer));// Create the timer with the specified arguments
+    ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_timer, 10 * 500000)); // 5000ms
+    lvgl_timer_handler(NULL); // Call the handler once to set the initial state of the ball and spinner
+ }
+
+
+/*
 void animation_controller_task(void *pvParameters) {
     //Give some time for both the animations to start and display their initial state
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -296,6 +339,7 @@ void animation_controller_task(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(5000)); // wait 5 seconds
     }
 }
+    */
 
  esp_err_t create_tasks( lv_disp_t *disp ) //Function to create tasks, which is called from the main function, the esp_err_t is used to return an error if the task cannot be created.
   {
@@ -316,13 +360,13 @@ void animation_controller_task(void *pvParameters) {
         5, 
         &xHandle );
         
-        
+        /*
         xTaskCreate( animation_controller_task,   //Function to create the task, which receives as the first argument the name of the function to be executed in the task, the second argument is the name of the task, the third argument is the size of the task stack, the fourth argument is a pointer to the parameters to be passed to the task, the fifth argument is the priority ofthe task andthe sixth argument is a pointer to a variable that will containthe handle ofthe task.
         "Handler", 
         STACK_SIZE, 
         NULL, 
         10, 
         &xHandle );    
-
+            */
  return ESP_OK; // Returns an error if the task cannot be created.
   }
