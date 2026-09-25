@@ -10,6 +10,9 @@ sdkconfig.old
 # Configuraciones locales del editor
 .vscode/
 
+# Componentes administrados
+managed_components/
+dependencies.lock
 
 # Archivos del sistema operativo (Windows/Mac)
 Thumbs.db
