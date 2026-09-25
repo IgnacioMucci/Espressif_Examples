@@ -15,6 +15,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "esp_timer.h"
+#include "freertos/event_groups.h"
 
 #if CONFIG_EXAMPLE_LCD_CONTROLLER_SH1107
 #include "esp_lcd_sh1107.h"
@@ -50,6 +51,8 @@ static const char *TAG = "example";
 
 #define STACK_SIZE 2048*2
 
+#define BIT_UI_SWITCH (1 << 0) // Bit to swtich between states on a Group Event
+
 
 //Ball parameters 
 static lv_obj_t *ball_obj;
@@ -66,6 +69,10 @@ static lv_obj_t *spinner_obj;
 TaskHandle_t ballTaskHandle = NULL; //Global variable to hold the handle of the ball task
 
 
+static EventGroupHandle_t ui_event_group; // Variable of the Group Event
+
+
+
 extern void example_lvgl_demo_ui(lv_disp_t *disp);
 esp_err_t create_tasks( lv_disp_t *disp ); // Function to create tasks, which is called from the main function, the esp_err_t is used to return an error if the task cannot be created.
 void ball_task( void * pvParameters );
@@ -73,7 +80,11 @@ void spinner_task( void * pvParameters );
 void animation_controller_task( void * pvParameters ); // Function to create a task that will control the animation, switching between the ball and the spinner every 5 seconds.
 void timer_init(); // Function to initialize the timer that will call the lvgl_timer_handler function every 5 seconds to switch between the ball and the spinner.
 static void lvgl_timer_handler(void* arg); // Function to handle the timer callback, which will be called every 5 seconds to switch between the ball and the spinner.
-
+ 
+void timer_init_group(void); // Timer to state when to switch tasks with event group
+void ui_event_group_init(void); // Function to create the event group
+static void switch_timer_group(void *arg); // When the timer gets to 5 sec it changes the bits 
+void group_state_task(void *pvParameters); // Function that triggers to swtich between the ball and the spinner
 
 void app_main(void)
 {
@@ -158,9 +169,9 @@ void app_main(void)
     lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
 
     ESP_LOGI(TAG, "Display LVGL Scroll Text");
-
+    ui_event_group_init();
     create_tasks(disp); //Call the function to create the task, the one that will execute the lvgl_task, the one that will execute the lv_timer_handler, the one that will update the screen.
-    timer_init(); //Initialize the timer that will call the lv_timer_handler function every 5 seconds to switch between the ball and the spinner.
+    timer_init_group(); //Initialize the timer that will call the lv_timer_handler function every 5 seconds to switch between the ball and the spinner.
 }
  
 
@@ -267,7 +278,7 @@ void spinner_task( void * pvParameters )
         // Release the mutex
         lvgl_port_unlock();
     }
-
+    if(spinner_obj) lv_obj_add_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
     // The task already created the UI and finished its job, it must delete itself.
     vTaskDelete(NULL);
 }
@@ -307,6 +318,55 @@ static void lvgl_timer_handler(void* arg) {
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_timer, 10 * 500000)); // 5000ms
     lvgl_timer_handler(NULL); // Call the handler once to set the initial state of the ball and spinner
  }
+
+
+void timer_init_group(void) {
+    const esp_timer_create_args_t timer_args = {
+        .callback = &switch_timer_group,
+        .name = "switch_timer",
+        .dispatch_method = ESP_TIMER_TASK,
+    };
+    esp_timer_handle_t switch_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &switch_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(switch_timer, 5 * 1000000)); // 5s
+
+}
+
+static void switch_timer_group(void *arg) { //Every time the timer gets to 5 sec this function changes the bit for switching to 1.
+    xEventGroupSetBits(ui_event_group, BIT_UI_SWITCH);
+}
+
+ void ui_event_group_init(void) {
+    ui_event_group = xEventGroupCreate();
+    configASSERT(ui_event_group != NULL); // Pop up error in case the event group wasn't created
+}
+
+void group_state_task(void *pvParameters) {
+    while (1) {
+        // pdTRUE = After it notices the bit in 1, it puts it to  0, so that in the next iteration it waits again
+        xEventGroupWaitBits(ui_event_group, BIT_UI_SWITCH, pdTRUE, pdFALSE, portMAX_DELAY);
+
+        if (lvgl_port_lock(portMAX_DELAY)) {
+            if (ball_state) {
+                if (ball_obj) lv_obj_add_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+                if (spinner_obj) lv_obj_clear_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                if (spinner_obj) lv_obj_add_flag(spinner_obj, LV_OBJ_FLAG_HIDDEN);
+                if (ball_obj) lv_obj_clear_flag(ball_obj, LV_OBJ_FLAG_HIDDEN);
+            }
+            lvgl_port_unlock();
+        }
+
+        if (ball_state) vTaskSuspend(ballTaskHandle);
+        else vTaskResume(ballTaskHandle);
+
+        ball_state = !ball_state;
+    }
+}
+
+
+
+
 
 
 /*
@@ -368,5 +428,12 @@ void animation_controller_task(void *pvParameters) {
         10, 
         &xHandle );    
             */
+        xTaskCreate(  group_state_task,
+        "Group_switch", 
+        STACK_SIZE, 
+        NULL, 
+        6, 
+        &xHandle );
+
  return ESP_OK; // Returns an error if the task cannot be created.
   }
